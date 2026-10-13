@@ -1,0 +1,137 @@
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pcap.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+void packet_handler(
+    unsigned char *args,
+    const struct pcap_pkthdr *header,
+    const unsigned char *packet)
+{
+    printf("\nPacket captured!\n");
+    printf("Packet Length: %d bytes\n", header->len);
+    printf("Captured Length: %d bytes\n", header->caplen);
+
+    if (header->caplen >= 14)
+    {
+        printf("Destination MAC: ");
+        for (int i = 0; i < 6; i++)
+            printf("%02X%s", packet[i], i == 5 ? "\n" : ":");
+
+        printf("Source MAC: ");
+        for (int i = 6; i < 12; i++)
+            printf("%02X%s", packet[i], i == 11 ? "\n" : ":");
+
+        unsigned short type =
+            (packet[12] << 8) | packet[13];
+
+        if (type == 0x0800)
+        {
+            printf("Protocol: IPv4\n");
+
+            if (header->caplen >= 34)
+            {
+                const unsigned char *ip = packet + 14;
+                char src[INET_ADDRSTRLEN];
+                char dst[INET_ADDRSTRLEN];
+
+                struct in_addr source, destination;
+                source.s_addr = *(unsigned int *)(ip + 12);
+                destination.s_addr = *(unsigned int *)(ip + 16);
+
+                inet_ntop(AF_INET, &source, src, sizeof(src));
+                inet_ntop(AF_INET, &destination, dst, sizeof(dst));
+
+                printf("Source IP: %s\n", src);
+                printf("Destination IP: %s\n", dst);
+
+                if (ip[9] == 6)
+                    printf("Transport Protocol: TCP\n");
+                else if (ip[9] == 17)
+                    printf("Transport Protocol: UDP\n");
+                else if (ip[9] == 1)
+                    printf("Transport Protocol: ICMP\n");
+            }
+        }
+        else if (type == 0x0806)
+        {
+            printf("Protocol: ARP\n");
+        }
+        else
+        {
+            printf("Protocol: Other\n");
+        }
+    }
+}
+
+int main()
+{
+    pcap_if_t *alldevs, *device;
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int count = 0;
+
+    if (pcap_findalldevs(&alldevs, errbuf) == -1)
+    {
+        printf("Error: %s\n", errbuf);
+        return 1;
+    }
+
+    printf("Available Network Interfaces:\n");
+
+    for (device = alldevs; device != NULL;
+         device = device->next)
+    {
+        printf("%d. %s\n", ++count, device->name);
+
+        if (device->description)
+            printf("   %s\n", device->description);
+    }
+
+    if (count == 0)
+    {
+        printf("No network interfaces found.\n");
+        pcap_freealldevs(alldevs);
+        return 1;
+    }
+
+    int choice;
+    printf("\nEnter interface number: ");
+    if (scanf("%d", &choice) != 1 ||
+        choice < 1 || choice > count)
+    {
+        printf("Invalid choice.\n");
+        pcap_freealldevs(alldevs);
+        return 1;
+    }
+
+    device = alldevs;
+    for (int i = 1; i < choice; i++)
+        device = device->next;
+
+    handle = pcap_open_live(
+        device->name, 65536, 1, 1000, errbuf);
+
+    if (handle == NULL)
+    {
+        printf("Capture error: %s\n", errbuf);
+        pcap_freealldevs(alldevs);
+        return 1;
+    }
+
+    printf("\nCapturing 10 packets...\n");
+    printf("Press Ctrl+C to stop if needed.\n");
+
+    pcap_freealldevs(alldevs);
+
+    if (pcap_loop(handle, 10, packet_handler, NULL) == -1)
+        printf("Capture failed: %s\n", pcap_geterr(handle));
+
+    pcap_close(handle);
+
+    printf("\nPacket capture completed.\n");
+    return 0;
+}
+```
